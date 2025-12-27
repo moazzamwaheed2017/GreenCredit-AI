@@ -17,7 +17,10 @@ const modelName = 'gemini-3-flash-preview';
 export const normalizeData = async (input: BorrowerInput): Promise<NormalizedData> => {
   const response = await ai.models.generateContent({
     model: modelName,
-    contents: `Normalize the following borrower input into a numerical feature set (0-100 scale): ${JSON.stringify(input)}`,
+    contents: `Normalize the following borrower input into a numerical feature set (0-100 scale). 
+    Input features like revenue (${input.revenue}), debt ratio (${input.debtToIncomeRatio}%), 
+    carbon intensity (${input.carbonIntensity}/100), and labor compliance (${input.laborCompliance}/100) 
+    should be mapped to standard risk weights. Full Input: ${JSON.stringify(input)}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {

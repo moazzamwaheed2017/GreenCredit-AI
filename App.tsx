@@ -1,5 +1,5 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, Cell, PieChart, Pie
@@ -7,7 +7,7 @@ import {
 import { 
   ChevronRight, ChevronLeft, ShieldCheck, Leaf, Activity, 
   TrendingUp, FileText, AlertTriangle, CheckCircle, ArrowRight,
-  Settings, Database, Scale
+  Settings, Database, Scale, Loader2
 } from 'lucide-react';
 import { 
   AppStep, BorrowerInput, NormalizedData, FinancialRiskResponse, 
@@ -19,18 +19,19 @@ import * as gemini from './services/geminiService';
 const App: React.FC = () => {
   const [step, setStep] = useState<AppStep>(AppStep.Input);
   const [loading, setLoading] = useState(false);
+  const [realTimeUpdate, setRealTimeUpdate] = useState(false);
   
   // Data State
   const [input, setInput] = useState<BorrowerInput>({
     businessType: 'SME',
     industry: 'Manufacturing',
-    revenue: '$5,000,000',
-    cashFlowStability: 'Moderate volatility',
-    debtToIncomeRatio: '35%',
+    revenue: 5000000,
+    cashFlowStability: 75,
+    debtToIncomeRatio: 35,
     creditHistory: '7 years clean',
     energySource: 'Grid Mix (Coal heavy)',
-    carbonIntensity: 'High',
-    laborCompliance: 'Good',
+    carbonIntensity: 80,
+    laborCompliance: 90,
     regulatoryIssues: 'None'
   });
 
@@ -42,17 +43,22 @@ const App: React.FC = () => {
   const [simulations, setSimulations] = useState<ClimateScenario[]>([]);
   const [review, setReview] = useState<ReviewSummary | null>(null);
 
+  const debounceTimer = useRef<NodeJS.Timeout | null>(null);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    setInput(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value, type } = e.target as HTMLInputElement;
+    setInput(prev => ({ 
+      ...prev, 
+      [name]: type === 'range' || type === 'number' ? Number(value) : value 
+    }));
   };
 
-  const runAnalysis = async () => {
-    setLoading(true);
+  const runAnalysis = useCallback(async (isRealTime = false) => {
+    if (!isRealTime) setLoading(true);
+    setRealTimeUpdate(true);
     try {
-      // Sequence the "Agents"
       const norm = await gemini.normalizeData(input);
       setNormalized(norm);
-      setStep(AppStep.Normalization);
 
       const [fin, sust] = await Promise.all([
         gemini.assessFinancialRisk(norm),
@@ -74,13 +80,31 @@ const App: React.FC = () => {
       const rev = await gemini.getReview({ norm, fin, sust, dec, up, sim });
       setReview(rev);
 
+      if (!isRealTime) setStep(AppStep.Normalization);
     } catch (error) {
       console.error(error);
-      alert("Analysis failed. Please check your API key.");
+      if (!isRealTime) alert("Analysis failed. Please check your API key.");
     } finally {
       setLoading(false);
+      setRealTimeUpdate(false);
     }
-  };
+  }, [input]);
+
+  // Debounced Effect for Real-Time Slider Updates
+  useEffect(() => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    
+    // Only trigger if we've already done an initial analysis or specifically want real-time
+    if (normalized) {
+      debounceTimer.current = setTimeout(() => {
+        runAnalysis(true);
+      }, 800);
+    }
+
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [input.revenue, input.debtToIncomeRatio, input.carbonIntensity, input.laborCompliance, input.cashFlowStability]);
 
   const nextStep = () => setStep(prev => Math.min(prev + 1, AppStep.Review));
   const prevStep = () => setStep(prev => Math.max(prev - 1, AppStep.Input));
@@ -91,50 +115,164 @@ const App: React.FC = () => {
         return (
           <div className="space-y-6 animate-fadeIn">
             <div className="bg-white p-8 rounded-2xl shadow-sm border border-emerald-50">
-              <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                <Database className="text-emerald-500" /> Borrower Data Entry
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Business Type</label>
-                  <select name="businessType" value={input.businessType} onChange={handleInputChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
-                    <option>SME</option>
-                    <option>Startup</option>
-                    <option>Enterprise</option>
-                  </select>
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                  <Database className="text-emerald-500" /> Borrower Data Entry
+                </h2>
+                {realTimeUpdate && (
+                  <div className="flex items-center gap-2 text-emerald-600 text-sm font-bold animate-pulse">
+                    <Loader2 size={16} className="animate-spin" /> Live Syncing Analysis...
+                  </div>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Sliders Section */}
+                <div className="space-y-6 bg-slate-50 p-6 rounded-xl">
+                  <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Interactive Risk Drivers</h3>
+                  
+                  <div>
+                    <label className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                      <span>Annual Revenue</span>
+                      <span className="text-emerald-600">${input.revenue.toLocaleString()}</span>
+                    </label>
+                    <input 
+                      type="range" name="revenue" min="100000" max="10000000" step="100000"
+                      value={input.revenue} onChange={handleInputChange}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                      <span>Debt-to-Income Ratio</span>
+                      <span className="text-emerald-600">{input.debtToIncomeRatio}%</span>
+                    </label>
+                    <input 
+                      type="range" name="debtToIncomeRatio" min="0" max="100" step="1"
+                      value={input.debtToIncomeRatio} onChange={handleInputChange}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                      <span>Carbon Intensity</span>
+                      <span className="text-emerald-600">{input.carbonIntensity}/100</span>
+                    </label>
+                    <input 
+                      type="range" name="carbonIntensity" min="0" max="100" step="1"
+                      value={input.carbonIntensity} onChange={handleInputChange}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                      <span>Labor Compliance</span>
+                      <span className="text-emerald-600">{input.laborCompliance}%</span>
+                    </label>
+                    <input 
+                      type="range" name="laborCompliance" min="0" max="100" step="1"
+                      value={input.laborCompliance} onChange={handleInputChange}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="flex justify-between text-sm font-bold text-slate-700 mb-2">
+                      <span>Cash Flow Stability</span>
+                      <span className="text-emerald-600">{input.cashFlowStability}%</span>
+                    </label>
+                    <input 
+                      type="range" name="cashFlowStability" min="0" max="100" step="1"
+                      value={input.cashFlowStability} onChange={handleInputChange}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Industry</label>
-                  <input name="industry" value={input.industry} onChange={handleInputChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Annual Revenue</label>
-                  <input name="revenue" value={input.revenue} onChange={handleInputChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Debt-to-Income Ratio</label>
-                  <input name="debtToIncomeRatio" value={input.debtToIncomeRatio} onChange={handleInputChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-slate-600 mb-2">Sustainability Profile (Energy/Carbon/Labor)</label>
-                  <textarea name="energySource" value={input.energySource} onChange={handleInputChange} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg h-24 focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="Describe energy usage, labor compliance, etc." />
+
+                {/* Static Form Section */}
+                <div className="space-y-6">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Industry</label>
+                    <select name="industry" value={input.industry} onChange={handleInputChange} className="w-full p-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm">
+                      <option>Manufacturing</option>
+                      <option>Technology</option>
+                      <option>Agriculture</option>
+                      <option>Energy</option>
+                      <option>Logistics</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Business Type</label>
+                    <div className="flex gap-2">
+                      {['SME', 'Startup', 'Enterprise'].map(type => (
+                        <button 
+                          key={type}
+                          onClick={() => setInput(p => ({ ...p, businessType: type }))}
+                          className={`flex-1 py-2 px-4 rounded-lg font-bold text-sm transition-all ${input.businessType === type ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          {type}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Energy Source Details</label>
+                    <textarea 
+                      name="energySource" 
+                      value={input.energySource} 
+                      onChange={handleInputChange} 
+                      className="w-full p-3 bg-white border border-slate-200 rounded-lg h-32 focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm" 
+                      placeholder="e.g., Primarily reliant on municipal grid, 10% solar offset..."
+                    />
+                  </div>
                 </div>
               </div>
+
               <button 
-                onClick={runAnalysis} 
+                onClick={() => runAnalysis(false)} 
                 disabled={loading}
-                className="mt-8 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-emerald-200 disabled:opacity-50 flex items-center justify-center gap-2"
+                className="mt-10 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-5 rounded-2xl transition-all shadow-xl shadow-emerald-200 disabled:opacity-50 flex items-center justify-center gap-3 text-lg"
               >
                 {loading ? (
                   <>
-                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                    Processing Multi-Agent Analysis...
+                    <Loader2 className="animate-spin" /> Processing Multi-Agent Analysis...
                   </>
                 ) : (
-                  <>Analyze & Run GreenCredit Engine <ArrowRight size={20} /></>
+                  <>Proceed to Full Report <ChevronRight size={24} /></>
                 )}
               </button>
             </div>
+            
+            {/* Real-time Score Preview Card */}
+            {normalized && (
+              <div className="bg-emerald-900 text-white p-8 rounded-2xl shadow-2xl flex flex-wrap gap-12 items-center justify-around animate-slideUp">
+                <div className="text-center">
+                  <div className="text-4xl font-black">{financialRisk?.score ?? '--'}</div>
+                  <div className="text-xs font-bold text-emerald-300 uppercase tracking-widest mt-1">Financial Health</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-black">{sustainabilityRisk?.score ?? '--'}</div>
+                  <div className="text-xs font-bold text-emerald-300 uppercase tracking-widest mt-1">ESG Impact</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-4xl font-black">{decision?.greenCreditScore ?? '--'}</div>
+                  <div className="text-xs font-bold text-emerald-300 uppercase tracking-widest mt-1">GreenCredit Score</div>
+                </div>
+                <div className="h-12 w-px bg-emerald-700 hidden lg:block"></div>
+                <div className="text-center">
+                  <div className={`text-xl font-bold px-6 py-2 rounded-full border-2 ${
+                    decision?.status === 'Green Approved' ? 'border-emerald-400 text-emerald-400' :
+                    decision?.status === 'Conditional' ? 'border-yellow-400 text-yellow-400' :
+                    'border-red-400 text-red-400'
+                  }`}>
+                    {decision?.status ?? 'Pending Analysis'}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         );
 
@@ -142,7 +280,7 @@ const App: React.FC = () => {
         return (
           <div className="space-y-6">
             <h2 className="text-3xl font-bold text-slate-800">1. Data Normalization</h2>
-            <p className="text-slate-500">Converting raw inputs into structured risk features.</p>
+            <p className="text-slate-500">Converting raw inputs into structured risk features using ai agents.</p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                 <h3 className="font-bold text-lg mb-4 text-emerald-700">Financial Vectors</h3>
@@ -506,7 +644,7 @@ const App: React.FC = () => {
       {/* Footer Branding */}
       <footer className="mt-20 border-t border-slate-200 pt-10 pb-20 px-6">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-slate-400 text-sm">
-          <p>© 2024 GreenCredit AI • Built with Google Gemini 3</p>
+          <p>© 2024 GreenCredit AI</p>
           <div className="flex gap-6">
             <a href="#" className="hover:text-emerald-600 transition-colors">Privacy</a>
             <a href="#" className="hover:text-emerald-600 transition-colors">Compliance</a>

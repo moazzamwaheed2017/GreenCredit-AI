@@ -2,13 +2,13 @@
 export interface BorrowerInput {
   businessType: string;
   industry: string;
-  revenue: string;
-  cashFlowStability: string;
-  debtToIncomeRatio: string;
+  revenue: number; // Numeric for slider
+  cashFlowStability: number; // Numeric for slider (0-100)
+  debtToIncomeRatio: number; // Numeric for slider (0-100)
   creditHistory: string;
   energySource: string;
-  carbonIntensity: string;
-  laborCompliance: string;
+  carbonIntensity: number; // Numeric for slider (0-100)
+  laborCompliance: number; // Numeric for slider (0-100)
   regulatoryIssues: string;
 }
 
